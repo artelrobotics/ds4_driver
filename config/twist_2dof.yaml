@@ -1,4 +1,4 @@
-stamped: false
+transmission: manual
 inputs:
   linear:
     x: axis_left_y
