@@ -1,11 +1,12 @@
 <?xml version="1.0"?>
 <launch>
-  <arg name="addr" default="" />
-
-  <node pkg="ds4_driver" type="demo.py" name="demo" />
-
-  <include file="$(find ds4_driver)/launch/ds4_driver.launch" >
-    <arg name="addr" value="$(arg addr)" />
-    <arg name="use_standard_msgs" value="false" />
-  </include>
+  <node pkg="ds4_driver" type="ds4_driver_node.py" name="ds4_driver" output="screen" >
+        <param name="backend" value="bluetooth" />
+        <param name="device_addr" value="" />
+        <param name="use_standard_msgs" value="false"/>
+  </node>
+  <node pkg="ds4_driver" type="ds4_twist_node.py" name="ds4_twist" output="screen" >
+        <rosparam command="load" file="$(find camel_robot)/config/bringup/ds4_2dof_config.yaml" />
+        <param name="stamped" value="false" />
+  </node>
 </launch>

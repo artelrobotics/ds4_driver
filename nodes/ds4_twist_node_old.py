@@ -15,7 +15,6 @@ from nav_msgs.msg import Odometry
 class StatusToTwist(object):
         
     def __init__(self):
-        self.msg_feedback = Feedback()
         self.rate = rospy.Rate(20)
         self._stamped = rospy.get_param("~stamped", False)
         if self._stamped:
@@ -46,7 +45,8 @@ class StatusToTwist(object):
                 self._attrs.append(attr)
 
         self._pub = rospy.Publisher("cmd_vel", self._cls, queue_size=1)
-        self.joystick_feedback = rospy.Publisher("set_feedback", Feedback, queue_size=1)
+        self.vibrator_toy = rospy.Publisher("set_feedback", Feedback, queue_size=1)
+        # self.obstacle_avoidance = rospy.Publisher("obstacle_avoidance", Bool, queue_size=1)
         self.emergancy_stop = rospy.ServiceProxy("driver/emergency_stop_service", emergency_stop_srv)
         # self.hook_service = rospy.ServiceProxy("common/hooks_ctrl", SetBool)
         # self.light_service = rospy.ServiceProxy("common/Light_server", light)
@@ -55,14 +55,8 @@ class StatusToTwist(object):
         
         rospy.Subscriber("status", Status, self.cb_status, queue_size=1)
         rospy.Subscriber("driver/fault_flag", channel_values, self.fault_flags_callback)
-        rospy.Subscriber("encoder/odom", Odometry, self.odometry_callback)
         # rospy.Subscriber('/camel_amr_1000_001/sound_state', String, self.sound_callback)
     
-    def odometry_callback(self, msg):
-        self.linear_x = abs(msg.twist.twist.linear.x)
-        self.angular_z = abs(msg.twist.twist.angular.z)
-
-        self.scale = max(self.linear_x, self.angular_z) + 0.1
 
 
     def sound_callback(self, msg):
@@ -72,72 +66,110 @@ class StatusToTwist(object):
         self.emergancy_status = value.value[0]
         return value.value[0]
 
-    def set_color(self, color_list):
-        """
-            Setting color of joystick
-            recieves color list type : list
-            publish self.msg_feedback message to feedback topic
-        """
-        self.msg_feedback.set_led = True  
-        self.msg_feedback.set_led_flash = True
-        self.msg_feedback.led_r, self.msg_feedback.led_g, self.msg_feedback.led_b = color_list 
-        self.joystick_feedback.publish(self.msg_feedback)
-
-    def hooks_ctrl(self, msg):
-        """
-            Hook control function:
-            recives msg type: Bool 
-            call hook service
-        """
-        self.hook_service(msg)
-
-    def emergancy_stop_ctrl(self, msg):
-        """
-            Emergancy stop function
-            revices msg type : Bool
-            calls emergancy_stop service with msg command 
-        """
-        self.emergancy_stop(msg)
-            
+        
     def cb_status(self, msg):
         """
-            Joystick status callback function
         :param msg:
         :type msg: Status
         :return:
         """
+        msg_feedback = Feedback()
+        self.msg = msg
+        msg_feedback.set_led = True
+        msg_feedback.set_led_flash = True
         input_vals = {}
         
         if self.led and not self.last_led and self.counter % 2 == 0 and self.emergancy_status == 0:            
-            self.set_color([0,1,0])
-                   
+            self.red = 0.0
+            self.green = 1.0
+            self.blue = 0.0    
+            msg_feedback.led_r = self.red
+            msg_feedback.led_g = self.green
+            msg_feedback.led_b = self.blue
+            self.vibrator_toy.publish(msg_feedback)
+            
         if not self.led and self.last_led or self.counter % 2 == 1:
-            self.set_color([1,0,0])
-            
+            self.red = 1.0
+            self.green = 0.0
+            self.blue = 0.0    
+            msg_feedback.led_r = self.red
+            msg_feedback.led_g = self.green
+            msg_feedback.led_b = self.blue
+            self.vibrator_toy.publish(msg_feedback)
+        
         if self.emergancy_status == 0 and self.counter % 2 == 0 and not msg.button_r2 and not msg.button_l2: 
-            self.set_color([0,1,0])
-                    
+            self.red = 0.0
+            self.green = 1.0
+            self.blue = 0.0    
+            msg_feedback.led_r = self.red
+            msg_feedback.led_g = self.green
+            msg_feedback.led_b = self.blue
+            self.vibrator_toy.publish(msg_feedback)
+        
         if self.emergancy_status != 0 and self.counter % 2 == 0: 
-            self.set_color([1,1,0])
-            
+            self.red = 1.0
+            self.green = 1.0
+            self.blue = 0.0    
+            msg_feedback.led_r = self.red
+            msg_feedback.led_g = self.green
+            msg_feedback.led_b = self.blue
+            self.vibrator_toy.publish(msg_feedback)
+        
+
         for attr in self._attrs:
             input_vals[attr] = getattr(msg, attr)
         
-        if msg.button_dpad_up:
-            hooks_ctrl(True)
-
-        if msg.button_dpad_down:
-            hooks_ctrl(False)
+        # if msg.button_dpad_up:
+        #     #try:
+        #     self.hook_service(True)
+        #     time.sleep(0.2)
+        #     #except rospy.ServiceException as e:
+        #     #    rospy.logerr(e)
         
+        # if msg.button_dpad_down:
+        #     #try:
+        #     self.hook_service(False)
+        #     time.sleep(0.2)
+        #     #except rospy.ServiceException as e:
+        #     #    rospy.logerr(e)
 
         if msg.button_options:
-            self.emergancy_stop_ctrl(True)
+            try:
+                self.emergancy_stop(True)
+                time.sleep(0.1)
+            except rospy.ServiceException as e:
+                rospy.logerr(e)
                     
         if msg.button_share:
-            self.emergancy_stop_ctrl(False)
+            try:
+                self.emergancy_stop(False)
+                time.sleep(0.1)
+            except rospy.ServiceException as e:
+                rospy.logerr(e)
+
         
-        if msg.button_trackpad and not self.last_state_trackpad:
-            self.counter += 1
+
+        if msg.button_r2 and not self.last_state_r2:
+            if self.scale < 1.1:
+                self.scale += 0.1
+                msg_feedback.led_r = self.red
+                msg_feedback.led_g = self.green
+                msg_feedback.led_b = self.blue
+                msg_feedback.set_rumble = True
+                msg_feedback.rumble_small = 1
+                msg_feedback.rumble_duration = 0.2
+                self.vibrator_toy.publish(msg_feedback)        
+                
+        if msg.button_l2 == 1 and self.last_state_l2 == 0:
+            if self.scale > 0.2:
+                self.scale -= 0.1
+                msg_feedback.led_r = self.red
+                msg_feedback.led_g = self.green
+                msg_feedback.led_b = self.blue
+                msg_feedback.set_rumble = True
+                msg_feedback.rumble_small = 1
+                msg_feedback.rumble_duration = 0.2
+                self.vibrator_toy.publish(msg_feedback)
         
         # if msg.button_l1 == 1 and self.last_state_l1 == 0:
         #     self.thread_2 = threading.Thread(target=self.light_up)
@@ -149,6 +181,8 @@ class StatusToTwist(object):
         #     self.light_service('light_type_2')
         #     time.sleep(0.1)
        
+        if msg.button_trackpad and not self.last_state_trackpad:
+            self.counter += 1
         
         self.last_led = self.led
         self.last_state_l2 = msg.button_l2
@@ -196,7 +230,7 @@ class StatusToTwist(object):
                 # scale = self._scales[vel_type].get(k, 1.0)
                 val = eval(expr, {}, input_vals)
                 if k == "z":
-                    setattr(vel_vec, k, 1.5 * self.scale * val)
+                    setattr(vel_vec, k, 2 * self.scale * val)
                 else:
                     setattr(vel_vec, k, self.scale * val)
         

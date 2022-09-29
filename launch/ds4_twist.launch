@@ -10,7 +10,7 @@
 
   <node pkg="ds4_driver" type="ds4_twist_node.py" name="ds4_twist" output="screen" >
     <rosparam command="load" file="$(find ds4_driver)/config/twist_$(arg dof)dof.yaml" />
-
     <param name="stamped" value="$(arg stamped)" />
+    <remap from="/camel_amr_1000_001/cmd_vel" to="/camel_amr_1000_001/driver/cmd_vel"/>
   </node>
 </launch>
