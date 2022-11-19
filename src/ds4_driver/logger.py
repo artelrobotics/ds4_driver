@@ -1,4 +1,4 @@
-import rclpy
+import rospy
 
 
 class Logger(object):
@@ -11,19 +11,19 @@ class Logger(object):
 
     def error(self, msg, *args, **kwargs):
         msg = self._format_msg_(msg, *args, **kwargs)
-        rclpy.logging.get_logger("ds4drv").error(msg)
+        rospy.logerr(msg)
 
     def warning(self, msg, *args, **kwargs):
         msg = self._format_msg_(msg, *args, **kwargs)
-        rclpy.logging.get_logger("ds4drv").warning(msg)
+        rospy.logwarn(msg)
 
     def info(self, msg, *args, **kwargs):
         msg = self._format_msg_(msg, *args, **kwargs)
-        rclpy.logging.get_logger("ds4drv").info(msg)
+        rospy.loginfo(msg)
 
     def debug(self, msg, *args, **kwargs):
         msg = self._format_msg_(msg, *args, **kwargs)
-        rclpy.logging.get_logger("ds4drv").debug(msg)
+        rospy.logdebug(msg)
 
     def _format_msg_(self, msg, *args, **kwargs):
         msg = msg.format(*args, **kwargs)

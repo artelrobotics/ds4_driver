@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
-import rclpy
+import rospy
 from ds4_driver.msg import Feedback, Status
 
 
 class Handler(object):
-    def __init__(self, node, status_topic="status", feedback_topic="set_feedback"):
-        self._node = node
+    def __init__(self, status_topic="status", feedback_topic="set_feedback"):
         self._min_interval = 0.1
-        self._last_pub_time = self._node.get_clock().now()
+        self._last_pub_time = rospy.Time()
         self._prev = Status()
         self._led = {
             "r": 0,
@@ -17,21 +16,16 @@ class Handler(object):
             "flashing": False,
         }
 
-        self._pub_feedback = self._node.create_publisher(Feedback, feedback_topic, 0)
-        self._sub_status = self._node.create_subscription(
-            Status, status_topic, self.cb_status, 0
-        )
+        self._pub_feedback = rospy.Publisher(feedback_topic, Feedback, queue_size=1)
+        rospy.Subscriber(status_topic, Status, self.cb_status, queue_size=1)
 
     def cb_status(self, msg):
         """
         :type msg: Status
         """
-        now = self._node.get_clock().now()
-
-        # Commenting out this check for now because to_sec() does not seem to work for rclpy Duration objects
-        # This checks to see if the min interval for a callback has been violated.
-        # if (now - self._last_pub_time).to_sec() < self._min_interval:
-        #     return
+        now = rospy.Time.now()
+        if (now - self._last_pub_time).to_sec() < self._min_interval:
+            return
 
         feedback = Feedback()
 
@@ -50,15 +44,15 @@ class Handler(object):
         if touch.active and msg.button_cross:
             feedback.set_led = True
             self._led["b"] = touch.x
-        feedback.led_r = float(self._led["r"])
-        feedback.led_g = float(self._led["g"])
-        feedback.led_b = float(self._led["b"])
+        feedback.led_r = self._led["r"]
+        feedback.led_g = self._led["g"]
+        feedback.led_b = self._led["b"]
 
         # Turn on/off flash with PS button
         if not self._prev.button_ps and msg.button_ps:
             feedback.set_led_flash = True
             if self._led["flashing"]:
-                feedback.led_flash_off = 0.0
+                feedback.led_flash_off = 0
             else:
                 feedback.led_flash_on = 0.2
                 feedback.led_flash_off = 0.2
@@ -70,14 +64,11 @@ class Handler(object):
 
 
 def main():
-    rclpy.init()
-    sample_node = rclpy.create_node("sample")
+    rospy.init_node("sample")
 
-    Handler(sample_node)
+    Handler()
 
-    rclpy.spin(sample_node)
-
-    rclpy.shutdown()
+    rospy.spin()
 
 
 if __name__ == "__main__":

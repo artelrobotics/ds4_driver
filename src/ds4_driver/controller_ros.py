@@ -1,5 +1,6 @@
-from ds4_driver.controller import Controller
+from .controller import Controller
 
+import rospy
 from sensor_msgs.msg import BatteryState
 from sensor_msgs.msg import Joy
 from sensor_msgs.msg import JoyFeedback
@@ -14,45 +15,34 @@ import math
 
 
 class ControllerRos(Controller):
-    def __init__(self, node):
+    def __init__(self):
         super(ControllerRos, self).__init__()
 
-        self.node = node
-        self._logger = self.node.get_logger()
-
-        self.node.declare_parameter("use_standard_msgs", False)
-        self.node.declare_parameter("deadzone", 0.1)
-        self.node.declare_parameter("frame_id", "ds4")
-        self.node.declare_parameter("imu_frame_id", "ds4_imu")
-        self.node.declare_parameter("autorepeat_rate", 0)
-
-        self.use_standard_msgs = self.node.get_parameter("use_standard_msgs").value
-        self.deadzone = self.node.get_parameter("deadzone").value
-        self.frame_id = self.node.get_parameter("frame_id").value
-        self.imu_frame_id = self.node.get_parameter("imu_frame_id").value
+        self.use_standard_msgs = rospy.get_param("~use_standard_msgs", False)
+        self.deadzone = rospy.get_param("~deadzone", 0.1)
+        self.frame_id = rospy.get_param("~frame_id", "ds4")
+        self.imu_frame_id = rospy.get_param("~imu_frame_id", "ds4_imu")
         # Only publish Joy messages on change
-        self._autorepeat_rate = self.node.get_parameter("autorepeat_rate").value
+        self._autorepeat_rate = rospy.get_param("~autorepeat_rate", 0)
         self._prev_joy = None
-
-        self.stop_rumble_timer = None
 
         # Use ROS-standard messages (like sensor_msgs/Joy)
         if self.use_standard_msgs:
-            self.pub_report = self.node.create_publisher(Report, "raw_report", 0)
-            self.pub_battery = self.node.create_publisher(BatteryState, "battery", 0)
-            self.pub_joy = self.node.create_publisher(Joy, "joy", 0)
-            self.pub_imu = self.node.create_publisher(Imu, "imu", 0)
-            self.sub_feedback = self.node.create_subscription(
-                JoyFeedbackArray, "set_feedback", self.cb_joy_feedback, 0
+            self.pub_report = rospy.Publisher("raw_report", Report, queue_size=1)
+            self.pub_battery = rospy.Publisher("battery", BatteryState, queue_size=1)
+            self.pub_joy = rospy.Publisher("joy", Joy, queue_size=1)
+            self.pub_imu = rospy.Publisher("imu", Imu, queue_size=1)
+            self.sub_feedback = rospy.Subscriber(
+                "set_feedback", JoyFeedbackArray, self.cb_joy_feedback, queue_size=1
             )
 
             if self._autorepeat_rate != 0:
                 period = 1.0 / self._autorepeat_rate
-                self.node.create_timer(period, self.cb_joy_pub_timer)
+                rospy.Timer(rospy.Duration.from_sec(period), self.cb_joy_pub_timer)
         else:
-            self.pub_status = self.node.create_publisher(Status, "status", 1)
-            self.sub_feedback = self.node.create_subscription(
-                Feedback, "set_feedback", self.cb_feedback, 0
+            self.pub_status = rospy.Publisher("status", Status, queue_size=1)
+            self.sub_feedback = rospy.Subscriber(
+                "set_feedback", Feedback, self.cb_feedback, queue_size=1
             )
 
     def cb_report(self, report):
@@ -63,7 +53,7 @@ class ControllerRos(Controller):
         """
         report_msg = Report()
         report_msg.header.frame_id = self.frame_id
-        report_msg.header.stamp = self.node.get_clock().now().to_msg()
+        report_msg.header.stamp = rospy.Time.now()
         for attr in dir(report):
             if attr.startswith("_"):
                 continue
@@ -108,45 +98,33 @@ class ControllerRos(Controller):
         :return:
         """
         if self.device is None:
-            self._logger.warning("No Device")
             return
 
         def to_int(v):
             return int(v * 255)
 
-        try:
-            self.control(
-                # LED color
-                led_red=to_int(msg.led_r) if msg.set_led else None,
-                led_green=to_int(msg.led_g) if msg.set_led else None,
-                led_blue=to_int(msg.led_b) if msg.set_led else None,
-                # Rumble
-                rumble_small=to_int(msg.rumble_small) if msg.set_rumble else None,
-                rumble_big=to_int(msg.rumble_big) if msg.set_rumble else None,
-                # Flash LED
-                flash_on=to_int(msg.led_flash_on / 2.5) if msg.set_led_flash else None,
-                flash_off=to_int(msg.led_flash_off / 2.5) if msg.set_led_flash else None,
-            )
-        except OSError as e:
-            self._logger.error(str(e) + " The controller might be disconnected!")
+        self.control(
+            # LED color
+            led_red=to_int(msg.led_r) if msg.set_led else None,
+            led_green=to_int(msg.led_g) if msg.set_led else None,
+            led_blue=to_int(msg.led_b) if msg.set_led else None,
+            # Rumble
+            rumble_small=to_int(msg.rumble_small) if msg.set_rumble else None,
+            rumble_big=to_int(msg.rumble_big) if msg.set_rumble else None,
+            # Flash LED
+            flash_on=to_int(msg.led_flash_on / 2.5) if msg.set_led_flash else None,
+            flash_off=to_int(msg.led_flash_off / 2.5) if msg.set_led_flash else None,
+        )
 
         # Timer to stop rumble
         if msg.set_rumble and msg.rumble_duration != 0:
-            self._logger.info(f"Rumbling for {msg.rumble_duration} seconds")
-            self.stop_rumble_timer = self.node.create_timer(
-                msg.rumble_duration, self.cb_stop_rumble
+            rospy.Timer(
+                rospy.Duration(msg.rumble_duration), self.cb_stop_rumble, oneshot=True
             )
 
-    def cb_stop_rumble(self):
+    def cb_stop_rumble(self, event):
         try:
             self.control(rumble_small=0, rumble_big=0)
-        except OSError as e:
-            self._logger.error(str(e) + " The controller might be disconnected!")
-
-        try:
-            if self.stop_rumble_timer is not None:
-                self.node.destroy_timer(self.stop_rumble_timer)
-                self.stop_rumble_timer = None
         except AttributeError:
             # The program exited and self.device was set to None
             pass
@@ -181,11 +159,9 @@ class ControllerRos(Controller):
                 elif jf.id == 1:
                     feedback.rumble_big = jf.intensity
 
-        feedback.rumble_duration = 1.0
-
         self.cb_feedback(feedback)
 
-    def cb_joy_pub_timer(self):
+    def cb_joy_pub_timer(self, _):
         if self._prev_joy is not None:
             self.pub_joy.publish(self._prev_joy)
 
@@ -224,7 +200,6 @@ class ControllerRos(Controller):
 
         # IMU (X: right, Y: up, Z: towards user)
         status_msg.imu.header = copy.deepcopy(status_msg.header)
-
         # To m/s^2: 0.98 mg/LSB (BMI055 data sheet Chapter 5.2.1)
         def to_mpss(v):
             return float(v) / (2 ** 13 - 1) * 9.80665 * 0.98

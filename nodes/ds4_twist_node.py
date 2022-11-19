@@ -1,59 +1,36 @@
 #!/usr/bin/env python3
 
-import rclpy
+import rospy
 from geometry_msgs.msg import Twist, TwistStamped
-from ds4_driver.msg import Status
-
-from collections import defaultdict
-import itertools
-
+from ds4_driver.msg import Status, Feedback
+from nav_msgs.msg import Odometry
 
 class StatusToTwist(object):
-    def __init__(self, node):
-        self._node = node
-        self._node.declare_parameter("stamped", False)
-        self._node.declare_parameter("frame_id", "base_link")
-
-        self._logger = self._node.get_logger()
-
-        self._stamped = self._node.get_parameter("stamped").value
-        self._frame_id = self._node.get_parameter("frame_id").value
+    def __init__(self):
+        self._stamped = rospy.get_param("~stamped", False)
         if self._stamped:
             self._cls = TwistStamped
+            self._frame_id = rospy.get_param("~frame_id", "base_link")
         else:
             self._cls = Twist
+        self._inputs = rospy.get_param("~inputs")
 
-        # Automatically create missing keys in a dict
-        def make_defaultdict():
-            return defaultdict(make_defaultdict)
-
-        param_dict = make_defaultdict()
-        param_types = ["inputs", "scales"]
-        param_categories = ["angular", "linear"]
-        param_axis = ["x", "y", "z"]
-        for t, c, a in itertools.product(param_types, param_categories, param_axis):
-            param_name = "{}.{}.{}".format(t, c, a)
-            self._node.declare_parameter(param_name)
-
-            param_value = self._node.get_parameter(param_name).value
-            if param_value is not None:
-                param_dict[t][c][a] = param_value
-
-        # Convert back to dict (in case a non-existent key is accessed later)
-        self._inputs = {k: dict(v) for k, v in param_dict["inputs"].items()}
-        self._scales = {k: dict(v) for k, v in param_dict["scales"].items()}
-
-        if self._inputs == {}:
-            msg = "inputs parameter is not specified: not doing anything"
-            self._logger.warning(msg)
-
+        self.last_state_l1 = 1
+        self.last_state_r1 = 1
+        self.msg = Status()
         self._attrs = []
         for attr in Status.__slots__:
-            # ROS2 message slots have a prepended underscore
-            if attr.startswith("_axis_") or attr.startswith("_button_"):
-                self._attrs.append(attr[1:])  # get rid of the prepended underscore
-        self._pub = self._node.create_publisher(self._cls, "cmd_vel", 0)
-        self._sub = self._node.create_subscription(Status, "status", self.cb_status, 0)
+            if attr.startswith("axis_") or attr.startswith("button_"):
+                self._attrs.append(attr)
+
+        self._pub = rospy.Publisher("cmd_vel", self._cls, queue_size=1)
+        rospy.Subscriber("status", Status, self.cb_status, queue_size=1)
+        rospy.Subscriber("odometry", Odometry, self.odometry_cb, queue_size=1)
+        self.vibrator_toy = rospy.Publisher("set_feedback", Feedback, queue_size=1)
+
+    def odometry_cb(self, msg):
+        self.scale = max(abs(msg.twist.twist.linear.x), abs(msg.twist.twist.angular.z)) + 0.1
+ 
 
     def cb_status(self, msg):
         """
@@ -61,43 +38,60 @@ class StatusToTwist(object):
         :type msg: Status
         :return:
         """
+        msg_feedback = Feedback()
         input_vals = {}
         for attr in self._attrs:
             input_vals[attr] = getattr(msg, attr)
 
+        # if msg.button_r2 and not self.last_state_r2:
+        #     if self.scale < 2.3:
+        #         self.scale += 0.1
+        #         msg_feedback.set_rumble = True
+        #         msg_feedback.rumble_small = 1
+        #         msg_feedback.rumble_duration = 0.2
+        #         self.vibrator_toy.publish(msg_feedback) 
+        
+        # if msg.button_l2 == 1 and self.last_state_l2 == 0:
+        #     if self.scale > 0.2:
+        #         self.scale -= 0.1
+        #         msg_feedback.set_rumble = True
+        #         msg_feedback.rumble_small = 1
+        #         msg_feedback.rumble_duration = 0.2
+        #         self.vibrator_toy.publish(msg_feedback)
+        
+        # self.last_state_l2 = msg.button_l2
+        # self.last_state_r2 = msg.button_r2
+        # self.last_state_l1 = msg.button_l1
+        # self.last_state_r1 = msg.button_r1
+        
+
         to_pub = self._cls()
         if self._stamped:
-            to_pub.header.stamp = self._node.get_clock().now().to_msg()
+            to_pub.header.stamp = rospy.Time.now()
             to_pub.header.frame_id = self._frame_id
             twist = to_pub.twist
         else:
             twist = to_pub
 
-        for vel_type in self._inputs.keys():
+        for vel_type in self._inputs:
             vel_vec = getattr(twist, vel_type)
             for k, expr in self._inputs[vel_type].items():
-                scale = self._scales[vel_type].get(k, 1.0)
-                if scale is None:
-                    scale = 1.0
-                try:
-                    val = eval(expr, {}, input_vals)
-                    setattr(vel_vec, k, scale * val)
-                except NameError:
-                    # some names are not defined
-                    pass
+                # scale = self._scales[vel_type].get(k, 1.0)
+                val = eval(expr, {}, input_vals)
+                if k == "z":
+                    setattr(vel_vec, k, 3 * self.scale * val)
+                else:
+                    setattr(vel_vec, k, self.scale * val)
 
         self._pub.publish(to_pub)
 
 
 def main():
-    rclpy.init()
-    node = rclpy.create_node("ds4_twist")
+    rospy.init_node("ds4_twist")
 
-    StatusToTwist(node)
+    StatusToTwist()
 
-    rclpy.spin(node)
-
-    rclpy.shutdown()
+    rospy.spin()
 
 
 if __name__ == "__main__":

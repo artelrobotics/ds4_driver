@@ -1,5 +1,5 @@
 # Human-readable and more ROS-compatible status of the device
-std_msgs/Header header
+Header header
 
 # Stick
 # Left: 1.0, Right: -1.0
